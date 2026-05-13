@@ -13,8 +13,6 @@
 
 int main(void) {
 
-    uint8_t version;
-
     clock_setup();
     systick_setup();
     gpio_setup();
@@ -23,19 +21,13 @@ int main(void) {
     spi_bus_init();
     sx127x_init();
 
-    version = sx127x_read_register(SX127X_REG_VERSION);
+    sx127x_set_lora_mode();
+    sx127x_set_frequency_915mhz();
 
     while (1) {
 
-        for (uint8_t i = 0U; i < version; i++) {
-
-            gpio_led_toggle();
-            delay_ms(300U);
-            gpio_led_toggle();
-            delay_ms(300U);
-        }
-
-        delay_ms(1000U);
+        gpio_led_toggle();
+        delay_ms(MAIN_LOOP_DELAY_MS);
     }
 
     return 0;

@@ -3,6 +3,7 @@
 
 #include "bsp/spi.h"
 #include "bsp/lora_gpio.h"
+#include "bsp/systick.h"
 
 void sx127x_init(void) {
 
@@ -31,4 +32,30 @@ void sx127x_write_register(uint8_t reg, uint8_t value) {
     spi_transfer_byte(value);
 
     spi_cs_deselect();
+}
+
+void sx127x_set_lora_mode(void) {
+
+    sx127x_write_register(
+            SX127X_REG_OP_MODE,
+            SX127X_LONG_RANGE_MODE | SX127X_MODE_SLEEP
+    );
+
+    delay_ms(10U);
+
+    sx127x_write_register(
+            SX127X_REG_OP_MODE,
+            SX127X_LONG_RANGE_MODE | SX127X_MODE_STDBY
+    );
+
+    delay_ms(10U);
+}
+
+void sx127x_set_frequency_915mhz(void) {
+    /* FRF = (Frequency * 2^19) / 32MHz
+       915MHz -> 0xE4C000 */
+
+    sx127x_write_register(SX127X_REG_FRF_MSB, 0xE4U);
+    sx127x_write_register(SX127X_REG_FRF_MID, 0xC0U);
+    sx127x_write_register(SX127X_REG_FRF_LSB, 0x00U);
 }
