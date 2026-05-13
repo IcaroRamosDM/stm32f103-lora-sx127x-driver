@@ -59,3 +59,48 @@ void sx127x_set_frequency_915mhz(void) {
     sx127x_write_register(SX127X_REG_FRF_MID, 0xC0U);
     sx127x_write_register(SX127X_REG_FRF_LSB, 0x00U);
 }
+
+void sx127x_send_packet(
+        const uint8_t *data,
+        uint8_t length
+) {
+    if ((data == 0U) || (length == 0U)) {
+
+        return;
+    }
+
+    sx127x_write_register(
+            SX127X_REG_FIFO_TX_BASE_ADDR,
+            0x00U
+    );
+
+    sx127x_write_register(
+            SX127X_REG_FIFO_ADDR_PTR,
+            0x00U
+    );
+
+    for (uint8_t i = 0U; i < length; i++) {
+
+        sx127x_write_register(
+                SX127X_REG_FIFO,
+                data[i]
+        );
+    }
+
+    sx127x_write_register(
+            SX127X_REG_PAYLOAD_LENGTH,
+            length
+    );
+
+    sx127x_write_register(
+            SX127X_REG_OP_MODE,
+            SX127X_LONG_RANGE_MODE | SX127X_MODE_TX
+    );
+
+    delay_ms(100U);
+
+    sx127x_write_register(
+            SX127X_REG_OP_MODE,
+            SX127X_LONG_RANGE_MODE | SX127X_MODE_STDBY
+    );
+}
