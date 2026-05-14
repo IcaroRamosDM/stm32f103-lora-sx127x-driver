@@ -14,3 +14,9 @@ uint8_t lora_link_send_reliable(
 );
 
 uint8_t lora_link_receive_and_ack(void);
+
+uint8_t lora_link_send_ping(
+  uint8_t destination_id
+);
+
+uint8_t lora_link_receive_ping_and_respond(void);
