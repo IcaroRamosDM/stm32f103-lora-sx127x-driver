@@ -140,4 +140,55 @@ clean:
 	rm -rf $(BUILD_DIR)
 	find . -name "*.o" -delete
 
-.PHONY: all bin hex flash erase reflash clean
+########################################
+# Node Targets
+########################################
+
+tx:
+	$(MAKE) clean
+	$(MAKE) APP_NODE=TX all
+
+rx:
+	$(MAKE) clean
+	$(MAKE) APP_NODE=RX all
+
+flash-tx:
+	$(MAKE) clean
+	$(MAKE) APP_NODE=TX flash
+
+flash-rx:
+	$(MAKE) clean
+	$(MAKE) APP_NODE=RX flash
+
+reflash-tx:
+	$(MAKE) APP_NODE=TX erase
+	$(MAKE) APP_NODE=TX flash
+
+reflash-rx:
+	$(MAKE) APP_NODE=RX erase
+	$(MAKE) APP_NODE=RX flash
+
+########################################
+# Extra CFLAGS
+########################################
+
+CFLAGS += -DAPP_NODE_$(APP_NODE)
+
+########################################
+# Phony
+########################################
+
+.PHONY: \
+	all \
+	bin \
+	hex \
+	flash \
+	erase \
+	reflash \
+	clean \
+	tx \
+	rx \
+	flash-tx \
+	flash-rx \
+	reflash-tx \
+	reflash-rx

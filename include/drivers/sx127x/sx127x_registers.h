@@ -17,6 +17,26 @@
 
 #define SX127X_REG_FIFO_ADDR_PTR        0x0DU
 #define SX127X_REG_FIFO_TX_BASE_ADDR    0x0EU
+#define SX127X_REG_FIFO_RX_BASE_ADDR    0x0FU
+#define SX127X_REG_RX_NB_BYTES          0x13U
+#define SX127X_REG_IRQ_FLAGS            0x12U
 #define SX127X_REG_PAYLOAD_LENGTH       0x22U
 
 #define SX127X_MODE_TX                  0x03U
+#define SX127X_MODE_RX_CONTINUOUS       0x05U
+
+#define SX127X_IRQ_RX_DONE              0x40U
+#define SX127X_IRQ_CLEAR_ALL            0xFFU
+
+#define SX127X_REG_PA_CONFIG              0x09U
+#define SX127X_REG_LNA                    0x0CU
+#define SX127X_REG_FIFO_RX_CURRENT_ADDR   0x10U
+#define SX127X_REG_MODEM_CONFIG_1         0x1DU
+#define SX127X_REG_MODEM_CONFIG_2         0x1EU
+#define SX127X_REG_PREAMBLE_MSB           0x20U
+#define SX127X_REG_PREAMBLE_LSB           0x21U
+#define SX127X_REG_MODEM_CONFIG_3         0x26U
+#define SX127X_REG_SYNC_WORD              0x39U
+
+#define SX127X_IRQ_TX_DONE                0x08U
+#define SX127X_IRQ_PAYLOAD_CRC_ERROR      0x20U
