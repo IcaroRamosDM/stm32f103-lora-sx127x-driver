@@ -7,349 +7,276 @@
 
 #include "protocol/lora_packet.h"
 
-#define LORA_LINK_RX_BUFFER_SIZE   64U
-#define LORA_LINK_ACK_TIMEOUT_MS   1000U
-#define LORA_LINK_MAX_RETRIES      3U
+#include <stddef.h>
 
-#define LORA_LINK_ACK_BLINK_MS     150U
-#define LORA_LINK_RX_BLINK_MS      200U
+#define LORA_LINK_RX_BUFFER_SIZE 64U
+#define LORA_LINK_ACK_TIMEOUT_MS 1000U
+#define LORA_LINK_MAX_ATTEMPTS 3U
+
+#define LORA_LINK_ACK_BLINK_MS 150U
+#define LORA_LINK_RX_BLINK_MS 200U
 
 static uint8_t lora_link_packet_id = 0U;
 
-static uint8_t lora_link_wait_for_ack(uint8_t expected_packet_id);
+static uint8_t lora_link_wait_for_ack(uint8_t expected_packet_id, uint8_t expected_source_id);
 static void lora_link_send_ack(uint8_t destination_id, uint8_t packet_id);
 
-static uint8_t lora_link_wait_for_pong(
-  uint8_t expected_packet_id
-);
+static uint8_t lora_link_wait_for_pong(uint8_t expected_packet_id, uint8_t expected_source_id);
 
-static void lora_link_send_pong(
-  uint8_t destination_id,
-  uint8_t packet_id
-);
+static void lora_link_send_pong(uint8_t destination_id, uint8_t packet_id);
 
-void lora_link_init(void)
-{
-  sx127x_start_receive();
+void lora_link_init(void) {
+    lora_link_packet_id = 0U;
+    sx127x_start_receive();
 }
 
-uint8_t lora_link_send_reliable(
-  uint8_t destination_id,
-  const uint8_t *payload,
-  uint8_t payload_length
-)
-{
-  lora_packet_t packet;
-  uint8_t tx_buffer[LORA_LINK_RX_BUFFER_SIZE];
-  uint8_t encoded_length;
-  uint8_t success = 0U;
+uint8_t lora_link_send_reliable(uint8_t destination_id, const uint8_t *payload,
+                                uint8_t payload_length) {
+    lora_packet_t packet;
+    uint8_t tx_buffer[LORA_LINK_RX_BUFFER_SIZE];
+    uint8_t encoded_length;
+    uint8_t success = 0U;
 
-  if ((payload == 0U) || (payload_length == 0U))
-  {
+    if ((payload == NULL) || (payload_length == 0U) ||
+        payload_length > LORA_PACKET_MAX_PAYLOAD_SIZE) {
+        return LORA_LINK_STATUS_FAILED;
+    }
+
+    lora_packet_init(&packet);
+
+    packet.source_id = LORA_NODE_TX_ID;
+    packet.destination_id = destination_id;
+    packet.packet_id = lora_link_packet_id;
+    packet.packet_type = LORA_PACKET_TYPE_DATA;
+    packet.payload_length = payload_length;
+
+    for (uint8_t i = 0U; i < payload_length; i++) {
+        packet.payload[i] = payload[i];
+    }
+
+    encoded_length = lora_packet_encode(&packet, tx_buffer, sizeof tx_buffer);
+    if (encoded_length == 0U) {
+        return LORA_LINK_STATUS_FAILED;
+    }
+
+    for (uint8_t attempt = 0U; attempt < LORA_LINK_MAX_ATTEMPTS; attempt++) {
+        sx127x_send_packet(tx_buffer, encoded_length);
+        sx127x_start_receive();
+
+        if (lora_link_wait_for_ack(lora_link_packet_id, destination_id) != 0U) {
+            success = 1U;
+            break;
+        }
+    }
+
+    if (success != 0U) {
+        lora_link_packet_id++;
+        return LORA_LINK_STATUS_OK;
+    }
+
     return LORA_LINK_STATUS_FAILED;
-  }
+}
 
-  lora_packet_init(&packet);
+uint8_t lora_link_receive_and_ack(void) {
+    uint8_t rx_buffer[LORA_LINK_RX_BUFFER_SIZE];
+    uint8_t received_length;
+    lora_packet_t packet;
 
-  packet.source_id = LORA_NODE_TX_ID;
-  packet.destination_id = destination_id;
-  packet.packet_id = lora_link_packet_id;
-  packet.packet_type = LORA_PACKET_TYPE_DATA;
-  packet.payload_length = payload_length;
+    received_length = sx127x_receive_packet(rx_buffer, LORA_LINK_RX_BUFFER_SIZE);
 
-  for (uint8_t i = 0U; i < payload_length; i++)
-  {
-    packet.payload[i] = payload[i];
-  }
+    if (received_length == 0U) {
+        return 0U;
+    }
 
-  encoded_length = lora_packet_encode(&packet, tx_buffer);
+    if (lora_packet_decode(&packet, rx_buffer, received_length) == 0U) {
+        sx127x_start_receive();
+        return 0U;
+    }
 
-  for (uint8_t retry = 0U; retry < LORA_LINK_MAX_RETRIES; retry++)
-  {
+    if ((packet.network_id != LORA_NETWORK_ID) || (packet.destination_id != LORA_NODE_RX_ID)) {
+        sx127x_start_receive();
+        return 0U;
+    }
+
+    if (packet.packet_type == LORA_PACKET_TYPE_DATA) {
+        gpio_led_set(true);
+        delay_ms(LORA_LINK_RX_BLINK_MS);
+        gpio_led_set(false);
+
+        lora_link_send_ack(packet.source_id, packet.packet_id);
+        sx127x_start_receive();
+
+        return 1U;
+    }
+
+    sx127x_start_receive();
+    return 0U;
+}
+
+static uint8_t lora_link_wait_for_ack(uint8_t expected_packet_id, uint8_t expected_source_id) {
+    uint8_t rx_buffer[LORA_LINK_RX_BUFFER_SIZE];
+    uint16_t timeout = 0U;
+
+    while (timeout < LORA_LINK_ACK_TIMEOUT_MS) {
+        uint8_t received_length;
+        lora_packet_t packet;
+
+        received_length = sx127x_receive_packet(rx_buffer, LORA_LINK_RX_BUFFER_SIZE);
+
+        if (received_length > 0U) {
+            if (lora_packet_decode(&packet, rx_buffer, received_length) != 0U) {
+                if ((packet.packet_type == LORA_PACKET_TYPE_ACK) &&
+                    (packet.packet_id == expected_packet_id) &&
+                    (packet.network_id == LORA_NETWORK_ID) &&
+                    (packet.source_id == expected_source_id) &&
+                    (packet.destination_id == LORA_NODE_TX_ID)) {
+                    gpio_led_set(true);
+                    delay_ms(LORA_LINK_ACK_BLINK_MS);
+                    gpio_led_set(false);
+
+                    return 1U;
+                }
+            }
+
+            sx127x_start_receive();
+        }
+
+        delay_ms(1U);
+        timeout++;
+    }
+
+    return 0U;
+}
+
+static void lora_link_send_ack(uint8_t destination_id, uint8_t packet_id) {
+    lora_packet_t ack_packet;
+    uint8_t tx_buffer[32U];
+    uint8_t encoded_length;
+
+    lora_packet_init(&ack_packet);
+
+    ack_packet.source_id = LORA_NODE_RX_ID;
+    ack_packet.destination_id = destination_id;
+    ack_packet.packet_id = packet_id;
+    ack_packet.packet_type = LORA_PACKET_TYPE_ACK;
+    ack_packet.payload_length = 0U;
+
+    encoded_length = lora_packet_encode(&ack_packet, tx_buffer, sizeof tx_buffer);
     sx127x_send_packet(tx_buffer, encoded_length);
+}
+
+uint8_t lora_link_send_ping(uint8_t destination_id) {
+    lora_packet_t packet;
+    uint8_t tx_buffer[LORA_LINK_RX_BUFFER_SIZE];
+    uint8_t encoded_length;
+
+    lora_packet_init(&packet);
+
+    packet.source_id = LORA_NODE_TX_ID;
+    packet.destination_id = destination_id;
+    packet.packet_id = lora_link_packet_id;
+    packet.packet_type = LORA_PACKET_TYPE_PING;
+    packet.payload_length = 0U;
+
+    encoded_length = lora_packet_encode(&packet, tx_buffer, sizeof tx_buffer);
+
+    sx127x_send_packet(tx_buffer, encoded_length);
+
     sx127x_start_receive();
 
-    if (lora_link_wait_for_ack(lora_link_packet_id) != 0U)
-    {
-      success = 1U;
-      break;
+    if (lora_link_wait_for_pong(lora_link_packet_id, destination_id) != 0U) {
+        lora_link_packet_id++;
+        return LORA_LINK_STATUS_OK;
     }
-  }
 
-  if (success != 0U)
-  {
-    lora_link_packet_id++;
-    return LORA_LINK_STATUS_OK;
-  }
-
-  return LORA_LINK_STATUS_FAILED;
+    return LORA_LINK_STATUS_FAILED;
 }
 
-uint8_t lora_link_receive_and_ack(void)
-{
-  uint8_t rx_buffer[LORA_LINK_RX_BUFFER_SIZE];
-  uint8_t received_length;
-  lora_packet_t packet;
+static uint8_t lora_link_wait_for_pong(uint8_t expected_packet_id, uint8_t expected_source_id) {
+    uint8_t rx_buffer[LORA_LINK_RX_BUFFER_SIZE];
+    uint16_t timeout = 0U;
 
-  received_length = sx127x_receive_packet(
-    rx_buffer,
-    LORA_LINK_RX_BUFFER_SIZE
-  );
+    while (timeout < LORA_LINK_ACK_TIMEOUT_MS) {
+        uint8_t received_length;
+        lora_packet_t packet;
 
-  if (received_length == 0U)
-  {
+        received_length = sx127x_receive_packet(rx_buffer, LORA_LINK_RX_BUFFER_SIZE);
+
+        if (received_length > 0U) {
+            if (lora_packet_decode(&packet, rx_buffer, received_length) != 0U) {
+                if ((packet.packet_type == LORA_PACKET_TYPE_PONG) &&
+                    (packet.packet_id == expected_packet_id) &&
+                    (packet.network_id == LORA_NETWORK_ID) &&
+                    (packet.source_id == expected_source_id) &&
+                    (packet.destination_id == LORA_NODE_TX_ID)) {
+                    gpio_led_set(true);
+                    delay_ms(LORA_LINK_ACK_BLINK_MS);
+                    gpio_led_set(false);
+
+                    return 1U;
+                }
+            }
+
+            sx127x_start_receive();
+        }
+
+        delay_ms(1U);
+        timeout++;
+    }
+
     return 0U;
-  }
-
-  if (lora_packet_decode(&packet, rx_buffer, received_length) == 0U)
-  {
-    sx127x_start_receive();
-    return 0U;
-  }
-
-  if ((packet.network_id != LORA_NETWORK_ID) ||
-      (packet.destination_id != LORA_NODE_RX_ID))
-  {
-    sx127x_start_receive();
-    return 0U;
-  }
-
-  if (packet.packet_type == LORA_PACKET_TYPE_DATA)
-  {
-    gpio_led_set(true);
-    delay_ms(LORA_LINK_RX_BLINK_MS);
-    gpio_led_set(false);
-
-    lora_link_send_ack(packet.source_id, packet.packet_id);
-    sx127x_start_receive();
-
-    return 1U;
-  }
-
-  sx127x_start_receive();
-  return 0U;
 }
 
-static uint8_t lora_link_wait_for_ack(uint8_t expected_packet_id)
-{
-  uint8_t rx_buffer[LORA_LINK_RX_BUFFER_SIZE];
-  uint16_t timeout = 0U;
-
-  while (timeout < LORA_LINK_ACK_TIMEOUT_MS)
-  {
+uint8_t lora_link_receive_ping_and_respond(void) {
+    uint8_t rx_buffer[LORA_LINK_RX_BUFFER_SIZE];
     uint8_t received_length;
     lora_packet_t packet;
 
-    received_length = sx127x_receive_packet(
-      rx_buffer,
-      LORA_LINK_RX_BUFFER_SIZE
-    );
+    received_length = sx127x_receive_packet(rx_buffer, LORA_LINK_RX_BUFFER_SIZE);
 
-    if (received_length > 0U)
-    {
-      if (lora_packet_decode(&packet, rx_buffer, received_length) != 0U)
-      {
-        if ((packet.packet_type == LORA_PACKET_TYPE_ACK) &&
-            (packet.packet_id == expected_packet_id) &&
-            (packet.destination_id == LORA_NODE_TX_ID))
-        {
-          gpio_led_set(true);
-          delay_ms(LORA_LINK_ACK_BLINK_MS);
-          gpio_led_set(false);
-
-          return 1U;
-        }
-      }
-
-      sx127x_start_receive();
+    if (received_length == 0U) {
+        return 0U;
     }
 
-    delay_ms(1U);
-    timeout++;
-  }
+    if (lora_packet_decode(&packet, rx_buffer, received_length) == 0U) {
+        sx127x_start_receive();
+        return 0U;
+    }
 
-  return 0U;
+    if ((packet.network_id != LORA_NETWORK_ID) || (packet.destination_id != LORA_NODE_RX_ID)) {
+        sx127x_start_receive();
+        return 0U;
+    }
+
+    if (packet.packet_type == LORA_PACKET_TYPE_PING) {
+        gpio_led_set(true);
+        delay_ms(LORA_LINK_RX_BLINK_MS);
+        gpio_led_set(false);
+
+        lora_link_send_pong(packet.source_id, packet.packet_id);
+
+        sx127x_start_receive();
+        return 1U;
+    }
+
+    sx127x_start_receive();
+    return 0U;
 }
 
-static void lora_link_send_ack(uint8_t destination_id, uint8_t packet_id)
-{
-  lora_packet_t ack_packet;
-  uint8_t tx_buffer[32U];
-  uint8_t encoded_length;
-
-  lora_packet_init(&ack_packet);
-
-  ack_packet.source_id = LORA_NODE_RX_ID;
-  ack_packet.destination_id = destination_id;
-  ack_packet.packet_id = packet_id;
-  ack_packet.packet_type = LORA_PACKET_TYPE_ACK;
-  ack_packet.payload_length = 0U;
-
-  encoded_length = lora_packet_encode(&ack_packet, tx_buffer);
-  sx127x_send_packet(tx_buffer, encoded_length);
-}
-
-uint8_t lora_link_send_ping(
-  uint8_t destination_id
-)
-{
-  lora_packet_t packet;
-  uint8_t tx_buffer[LORA_LINK_RX_BUFFER_SIZE];
-  uint8_t encoded_length;
-
-  lora_packet_init(&packet);
-
-  packet.source_id = LORA_NODE_TX_ID;
-  packet.destination_id = destination_id;
-  packet.packet_id = lora_link_packet_id;
-  packet.packet_type = LORA_PACKET_TYPE_PING;
-  packet.payload_length = 0U;
-
-  encoded_length = lora_packet_encode(
-    &packet,
-    tx_buffer
-  );
-
-  sx127x_send_packet(
-    tx_buffer,
-    encoded_length
-  );
-
-  sx127x_start_receive();
-
-  if (lora_link_wait_for_pong(
-        lora_link_packet_id
-      ) != 0U)
-  {
-    lora_link_packet_id++;
-    return LORA_LINK_STATUS_OK;
-  }
-
-  return LORA_LINK_STATUS_FAILED;
-}
-
-static uint8_t lora_link_wait_for_pong(
-  uint8_t expected_packet_id
-)
-{
-  uint8_t rx_buffer[LORA_LINK_RX_BUFFER_SIZE];
-  uint16_t timeout = 0U;
-
-  while (timeout < LORA_LINK_ACK_TIMEOUT_MS)
-  {
-    uint8_t received_length;
+static void lora_link_send_pong(uint8_t destination_id, uint8_t packet_id) {
     lora_packet_t packet;
+    uint8_t tx_buffer[32U];
+    uint8_t encoded_length;
 
-    received_length = sx127x_receive_packet(
-      rx_buffer,
-      LORA_LINK_RX_BUFFER_SIZE
-    );
+    lora_packet_init(&packet);
 
-    if (received_length > 0U)
-    {
-      if (lora_packet_decode(
-            &packet,
-            rx_buffer,
-            received_length
-          ) != 0U)
-      {
-        if ((packet.packet_type == LORA_PACKET_TYPE_PONG) &&
-            (packet.packet_id == expected_packet_id))
-        {
-          gpio_led_set(true);
-          delay_ms(LORA_LINK_ACK_BLINK_MS);
-          gpio_led_set(false);
+    packet.source_id = LORA_NODE_RX_ID;
+    packet.destination_id = destination_id;
+    packet.packet_id = packet_id;
+    packet.packet_type = LORA_PACKET_TYPE_PONG;
+    packet.payload_length = 0U;
 
-          return 1U;
-        }
-      }
+    encoded_length = lora_packet_encode(&packet, tx_buffer, sizeof tx_buffer);
 
-      sx127x_start_receive();
-    }
-
-    delay_ms(1U);
-    timeout++;
-  }
-
-  return 0U;
-}
-
-uint8_t lora_link_receive_ping_and_respond(void)
-{
-  uint8_t rx_buffer[LORA_LINK_RX_BUFFER_SIZE];
-  uint8_t received_length;
-  lora_packet_t packet;
-
-  received_length = sx127x_receive_packet(
-    rx_buffer,
-    LORA_LINK_RX_BUFFER_SIZE
-  );
-
-  if (received_length == 0U)
-  {
-    return 0U;
-  }
-
-  if (lora_packet_decode(
-        &packet,
-        rx_buffer,
-        received_length
-      ) == 0U)
-  {
-    sx127x_start_receive();
-    return 0U;
-  }
-
-  if ((packet.network_id != LORA_NETWORK_ID) ||
-      (packet.destination_id != LORA_NODE_RX_ID))
-  {
-    sx127x_start_receive();
-    return 0U;
-  }
-
-  if (packet.packet_type == LORA_PACKET_TYPE_PING)
-  {
-    gpio_led_set(true);
-    delay_ms(LORA_LINK_RX_BLINK_MS);
-    gpio_led_set(false);
-
-    lora_link_send_pong(
-      packet.source_id,
-      packet.packet_id
-    );
-
-    sx127x_start_receive();
-    return 1U;
-  }
-
-  sx127x_start_receive();
-  return 0U;
-}
-
-static void lora_link_send_pong(
-  uint8_t destination_id,
-  uint8_t packet_id
-)
-{
-  lora_packet_t packet;
-  uint8_t tx_buffer[32U];
-  uint8_t encoded_length;
-
-  lora_packet_init(&packet);
-
-  packet.source_id = LORA_NODE_RX_ID;
-  packet.destination_id = destination_id;
-  packet.packet_id = packet_id;
-  packet.packet_type = LORA_PACKET_TYPE_PONG;
-  packet.payload_length = 0U;
-
-  encoded_length = lora_packet_encode(
-    &packet,
-    tx_buffer
-  );
-
-  sx127x_send_packet(
-    tx_buffer,
-    encoded_length
-  );
+    sx127x_send_packet(tx_buffer, encoded_length);
 }

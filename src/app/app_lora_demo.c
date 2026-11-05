@@ -10,28 +10,24 @@
 
 #include <stdint.h>
 
-#define APP_LORA_TX_DELAY_MS  2000U
+#define APP_LORA_TX_DELAY_MS 2000U
 
-void app_lora_demo_init(void)
-{
+void app_lora_demo_init(void) {
 #if (APP_NODE_IS_RX != 0U)
-  lora_link_init();
+    lora_link_init();
 #endif
 }
 
-void app_lora_demo_run(void)
-{
+void app_lora_demo_run(void) {
 #if (APP_NODE_IS_TX != 0U)
 
-  (void) lora_link_send_ping(
-    LORA_NODE_RX_ID
-  );
+    (void)lora_link_send_ping(LORA_NODE_RX_ID);
 
-  delay_ms(APP_LORA_TX_DELAY_MS);
+    delay_ms(APP_LORA_TX_DELAY_MS);
 
 #elif (APP_NODE_IS_RX != 0U)
 
-  (void) lora_link_receive_ping_and_respond();
+    (void)lora_link_receive_ping_and_respond();
 
 #endif
 }

@@ -10,12 +10,7 @@ void gpio_setup(void) {
     rcc_periph_clock_enable(GPIO_LED_RCC);
     rcc_periph_clock_enable(RCC_GPIOB);
 
-    gpio_set_mode(
-            GPIO_LED_PORT,
-            GPIO_MODE_OUTPUT_2_MHZ,
-            GPIO_CNF_OUTPUT_PUSHPULL,
-            GPIO_LED_PIN
-    );
+    gpio_set_mode(GPIO_LED_PORT, GPIO_MODE_OUTPUT_2_MHZ, GPIO_CNF_OUTPUT_PUSHPULL, GPIO_LED_PIN);
 
     gpio_led_set(false);
 }

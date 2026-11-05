@@ -12,14 +12,8 @@ void sx127x_set_frequency(uint32_t frequency_hz);
 
 void sx127x_configure_lora_defaults(void);
 
-void sx127x_send_packet(
-        const uint8_t *data,
-        uint8_t length
-);
+void sx127x_send_packet(const uint8_t *data, uint8_t length);
 
 void sx127x_start_receive(void);
 
-uint8_t sx127x_receive_packet(
-        uint8_t *buffer,
-        uint8_t max_length
-);
+uint8_t sx127x_receive_packet(uint8_t *buffer, uint8_t max_length);

@@ -12,7 +12,7 @@
 #include "drivers/sx127x/sx127x_registers.h"
 #include "drivers/sx127x/sx127x_config.h"
 
-#define MAIN_LOOP_DELAY_MS      2000U
+#define MAIN_LOOP_DELAY_MS 2000U
 
 int main(void) {
 
